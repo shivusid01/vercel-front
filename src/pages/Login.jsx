@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
+import { authAPI } from "../services/api";
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -20,7 +21,7 @@ const Login = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  const { login } = useAuth();
+  const { login: updateAuthContext } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -41,7 +42,11 @@ const Login = () => {
   const validateForm = () => {
     const newErrors = {};
     if (!formData.email.trim()) newErrors.email = "Email is required";
+    else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = "Email is invalid";
+    
     if (!formData.password) newErrors.password = "Password is required";
+    else if (formData.password.length < 6) newErrors.password = "Password must be at least 6 characters";
+    
     return newErrors;
   };
 
@@ -60,70 +65,130 @@ const Login = () => {
     setErrors({});
 
     try {
-      console.log("📤 Calling login function with:", {
+      console.log("📤 Calling authAPI.login with:", {
         email: formData.email,
-        passwordLength: formData.password.length
+        baseURL: "https://event-backend-brown.vercel.app"
       });
 
-      const result = await login({
+      // ✅ Use authAPI.login with deployed backend
+      const response = await authAPI.login({
         email: formData.email,
         password: formData.password,
       });
 
-      console.log("📥 Login result received:", {
-        success: result?.success,
-        userExists: !!result?.user,
-        userRole: result?.user?.role,
-        error: result?.error
-      });
+      console.log("📥 Login API response:", response);
+
+      // Check if response exists
+      if (!response) {
+        console.error("❌ No response from server");
+        setErrors({ 
+          general: "Server not responding. Please try again." 
+        });
+        return;
+      }
+
+      // Axios wraps the actual response in data property
+      const result = response.data;
+      
+      console.log("📦 Response data:", result);
 
       if (!result || !result.success) {
-        console.error("❌ Login failed in handleSubmit");
+        console.error("❌ API login failed:", result?.message);
         setErrors({ 
-          general: result?.error || "Invalid email or password" 
+          general: result?.message || "Invalid email or password" 
         });
         return;
       }
 
       if (!result.user) {
-        console.error("❌ No user in result");
+        console.error("❌ No user in API response");
         setErrors({ 
           general: "User data not received. Please try again." 
         });
         return;
       }
 
-      console.log("✅✅✅ LOGIN SUCCESSFUL! Ready to redirect...");
-      console.log("👤 User role:", result.user.role);
+      console.log("✅✅✅ LOGIN SUCCESSFUL via deployed backend!");
+      console.log("👤 User data:", {
+        id: result.user._id || result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        role: result.user.role,
+        token: result.token ? "Present" : "Missing"
+      });
+
+      // ✅ Update auth context if needed
+      if (updateAuthContext && typeof updateAuthContext === 'function') {
+        console.log("🔄 Updating auth context...");
+        await updateAuthContext({
+          success: true,
+          user: result.user,
+          token: result.token,
+          message: result.message
+        });
+        console.log("✅ Auth context updated");
+      }
+
       console.log("📍 Current URL:", window.location.href);
 
-      // ✅ FIX: Use window.location for guaranteed redirect
-      // This ALWAYS works
+      // ✅ Determine redirect URL based on user role
+      let redirectUrl = "/student/dashboard";
       if (result.user.role === "admin") {
-        console.log("🚀 Redirecting to admin dashboard...");
-        // Method 1: Direct URL change (most reliable)
-        window.location.href = "/admin/dashboard";
-        // Method 2: Alternative
-        // window.location.assign("/admin/dashboard");
-      } else {
-        console.log("🚀 Redirecting to student dashboard...");
-        window.location.href = "/student/dashboard";
+        redirectUrl = "/admin/dashboard";
       }
+
+      console.log(`🚀 Redirecting to: ${redirectUrl}`);
+
+      // ✅ Store auth data in localStorage for persistence
+      if (result.token) {
+        localStorage.setItem("authToken", result.token);
+        localStorage.setItem("user", JSON.stringify(result.user));
+      }
+
+      // ✅ Use window.location for guaranteed redirect
+      window.location.href = redirectUrl;
 
       // Optional: Also try navigate as backup
       setTimeout(() => {
         console.log("🔄 Trying navigate as backup...");
-        if (result.user.role === "admin") {
-          navigate("/admin/dashboard", { replace: true });
-        } else {
-          navigate("/student/dashboard", { replace: true });
-        }
+        navigate(redirectUrl, { replace: true });
       }, 100);
 
     } catch (error) {
-      console.error("🔥 Unexpected error in handleSubmit:", error);
+      console.error("🔥 API Error in handleSubmit:", {
+        name: error.name,
+        message: error.message,
+        response: error.response,
+        request: error.request
+      });
+
+      let errorMessage = "Login failed. Please try again.";
+      
+      if (error.response) {
+        // Server responded with error status
+        const { status, data } = error.response;
+        console.error(`❌ Server error ${status}:`, data);
+        
+        if (status === 401) {
+          errorMessage = "Invalid email or password";
+        } else if (status === 404) {
+          errorMessage = "User not found";
+        } else if (status === 500) {
+          errorMessage = "Server error. Please try again later.";
+        } else if (data?.message) {
+          errorMessage = data.message;
+        }
+      } else if (error.request) {
+        // Request was made but no response
+        console.error("❌ No response from server");
+        errorMessage = "Cannot connect to server. Please check your internet connection.";
+      } else {
+        // Something else happened
+        console.error("❌ Request setup error:", error.message);
+      }
+
       setErrors({ 
-        general: "Login failed. Please try again." 
+        general: errorMessage 
       });
     } finally {
       setIsSubmitting(false);
@@ -161,8 +226,15 @@ const Login = () => {
             animate={{ opacity: [0.3, 0.7, 0.3] }}
             transition={{ duration: 1.5, repeat: Infinity, delay: 0.2 }}
           >
-            Preparing your secure access
+            Connecting to secure server...
           </motion.p>
+          <motion.div
+            className="mt-6 text-sm text-gray-500"
+            animate={{ opacity: [0.5, 1] }}
+            transition={{ duration: 1 }}
+          >
+            <p>Backend: https://event-backend-brown.vercel.app</p>
+          </motion.div>
         </div>
       </div>
     );
@@ -199,6 +271,14 @@ const Login = () => {
           >
             Sign in to your account to continue
           </motion.p>
+          <motion.div 
+            className="mt-2 text-sm text-green-600 bg-green-50 inline-block px-3 py-1 rounded-full"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 1 }}
+          >
+            ✅ Connected to Secure Server
+          </motion.div>
         </motion.div>
 
         {/* Form Card with Animation */}
@@ -381,7 +461,7 @@ const Login = () => {
                     animate={{ rotate: 360 }}
                     transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   />
-                  Signing in...
+                  Connecting to server...
                 </motion.span>
               ) : (
                 <motion.span 
@@ -462,7 +542,7 @@ const Login = () => {
                 <div className="font-bold bg-gradient-to-r from-red-600 to-purple-900 bg-clip-text text-transparent">
                   Secure Login
                 </div>
-                <div className="text-sm text-gray-600">100% Protected</div>
+                <div className="text-sm text-gray-600">Backend Connected</div>
               </div>
             </div>
           </div>

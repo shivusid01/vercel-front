@@ -47,14 +47,53 @@ const StudentClasses = () => {
     }
   }
 
-  const handleJoinClass = async (classItem) => {
-    try {
-      await classAPI.joinClass(classItem._id)
-      window.open(classItem.meetingLink, '_blank')
-    } catch (error) {
-      alert(error.response?.data?.message || 'Failed to join class')
+// 🔥 FIXED: handleJoinClass in Classes.jsx
+const handleJoinClass = async (classItem, e) => {
+  // ✅ Prevent any default behavior
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  console.log('🚀 Joining class:', classItem.subject);
+  console.log('🔗 Meeting link:', classItem.meetingLink);
+  
+  // Directly open the link in new tab
+  if (classItem.meetingLink) {
+    const cleanLink = classItem.meetingLink.trim();
+    
+    if (cleanLink.startsWith('http://') || cleanLink.startsWith('https://')) {
+      window.open(cleanLink, '_blank', 'noopener,noreferrer');
+    } else {
+      window.open(`https://${cleanLink}`, '_blank', 'noopener,noreferrer');
     }
   }
+  
+  // Optional: Update join status in backend
+  try {
+    await classAPI.joinClass(classItem._id);
+  } catch (error) {
+    console.warn('Join status update failed:', error.message);
+  }
+};
+
+// बटन को ऐसे अपडेट करें:
+{isLive ? (
+  <button 
+    onClick={(e) => handleJoinClass(classItem, e)} // ✅ e parameter pass करें
+    className="btn-primary"
+  >
+    Join Now
+  </button>
+) : isUpcoming ? (
+  <button className="btn-secondary">
+    Starts at {formatTime(classItem.startTime)}
+  </button>
+) : (
+  <button className="btn-secondary">
+    {classItem.recordingLink ? 'Watch Recording' : 'Completed'}
+  </button>
+)}
 
   // Format functions
   const formatDateTime = (dateString) => {
@@ -145,7 +184,7 @@ const StudentClasses = () => {
                       <div>
                         {isLive ? (
                           <button 
-                            onClick={() => handleJoinClass(classItem)}
+                            onClick={() => handleJoinClass(classItem,e)}
                             className="btn-primary"
                           >
                             Join Now

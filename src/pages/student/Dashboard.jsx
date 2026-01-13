@@ -61,30 +61,44 @@ const StudentDashboard = () => {
     }
   }
 
-  const handleJoinClass = async (classItem) => {
-    try {
-      // Join the class
-      await classAPI.joinClass(classItem._id)
-      
-      // Open meeting link
-      if (classItem.meetingLink) {
-        window.open(classItem.meetingLink, '_blank', 'noopener,noreferrer')
-      }
-      
-      // Update local state
-      setLiveClasses(prev => 
-        prev.map(cls => 
-          cls._id === classItem._id 
-            ? { ...cls, isJoined: true } 
-            : cls
-        )
-      )
-      
-    } catch (error) {
-      console.error('Error joining class:', error)
-      alert(error.response?.data?.message || 'Failed to join class')
-    }
+// 🔥 FIXED: handleJoinClass in StudentDashboard
+const handleJoinClass = async (classItem, e) => {
+  // ✅ IMPORTANT: Prevent default form submission
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
   }
+  
+  console.log('🎯 Joining class from dashboard:', classItem._id);
+  console.log('🔗 Meeting link:', classItem.meetingLink);
+  
+  // ✅ Open meeting link in NEW TAB immediately
+  if (classItem.meetingLink) {
+    // Clean the link - remove any extra spaces
+    const cleanLink = classItem.meetingLink.trim();
+    
+    // Check if it's a valid URL
+    if (cleanLink.startsWith('http')) {
+      console.log('📤 Opening link:', cleanLink);
+      window.open(cleanLink, '_blank', 'noopener,noreferrer');
+    } else {
+      // If it's not a full URL, make it one
+      const fullLink = cleanLink.includes('http') ? cleanLink : `https://${cleanLink}`;
+      console.log('📤 Opening full link:', fullLink);
+      window.open(fullLink, '_blank', 'noopener,noreferrer');
+    }
+  } else {
+    alert('Meeting link not available for this class');
+    return;
+  }
+  
+  // Optional: Mark as joined in backend
+  try {
+    await classAPI.joinClass(classItem._id);
+  } catch (apiError) {
+    console.warn('Could not update join status:', apiError.message);
+  }
+};
 
   // Format time function
   const formatTime = (dateString) => {
